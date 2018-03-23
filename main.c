@@ -22,15 +22,16 @@
 
 
 /* Prototypes */
-void print_vec(const char *label, double *vec, int len);
+void print_vec(const char *label, double *vec);
+void print_mat(const char *label, double *matrix);
 void initialization(double vec[], int size);
 float random();
 int main(int argc, char *argv[]){
 	//Q1 = Test the function with different parameters.
 	//double start, end;
 	srand (99);
-	double wallets [Wallet];
-	double transactions[Wallet][TR];
+	double wallets [NWallet];
+	double transactions[NWallet][TR];
 	double amount; 
 	initialization(wallets, NWallet);
 	for(int i = 0; i < TR ; i++){
@@ -38,18 +39,26 @@ int main(int argc, char *argv[]){
 		
 		if(amount <  wallets[0])
 		{
-			wallets -= amount;
+			wallets[0] -= amount;
 			transactions[0][i] = -amount;
 		}else
 		{
-			transactions[0][i] = 0;
-			
+			transactions[0][i] = 0;			
 		}
 	}
 	random();
 	
 	
 	return EXIT_SUCCESS;;
+}
+
+void print_vec(const char *label, double *vec){
+	printf("%s\n", label);
+	for(int i =0; i<NWallet;++i)
+		printf("%.2f\t", vec[i]);
+	return;
+}
+void print_mat(const char *label, double *matrix){
 }
 
 // Initializa the vector with minimal amount
