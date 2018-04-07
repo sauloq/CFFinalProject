@@ -51,8 +51,8 @@ int main(int argc, char *argv[]){
 	int approved=0, refused=0;
 	initialization(wallets, NWallet);
 	print_vec("Initial Balance", wallets);
-	for(sender = 0; sender < NWallet ; ++sender)
-		for(int i = 0; i < TR ; i++){
+	for(int i = 0; i < TR ; i++)
+		for(sender = 0; sender < NWallet ; ++sender){
 			//sender = randomI();
 			receiver = randomI(sender);
 			amount = randomF();
