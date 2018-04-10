@@ -15,11 +15,13 @@
 /* Constants */
 
 #define NWallet 40 // number of Wallets
-#define TR 40000 // number of transactions
+#define TR 1000 // number of transactions
 #define Balance 3
 #define PRINT_VECS 1
 #define DEBUG 1
 #define MAX_RAND 10000  // max value of elements generated for array
+#define BLOCK "blockchain.log"
+#define BLOCKSIZE 100
 
 struct transaction 
 {
@@ -35,18 +37,19 @@ void print_mat(const char *label, struct transaction matrix[NWallet*TR]);
 void initialization(double vec[], int size);
 float randomF();
 int randomI(int exc);
-bool flushTDisk(); //fucntion to flush transaction table to the disk
-bool flushBDisk(); //fucntion to flush Balance array to the disk
+void flushTDisk(); //fucntion to flush transaction table to the disk
+void flushBDisk(); //fucntion to flush Balance array to the disk
 bool processTransaction(double wallets[], struct transaction transactions[NWallet*TR],int sender, int receiver, double amount, int i);
 void savetodisk(double wallets[], struct transaction transactions[NWallet*TR]);
+void printChecksum (double vec[]);
 int main(int argc, char *argv[]){
 	//Q1 = Test the function with different parameters.
 	double start, end;
 	srand (99);
 	double wallets [NWallet];
-	struct transaction transactions[TR]; //= (Transaction) malloc((NWallet*TR) * sizeof(Transaction));
+	struct transaction transactions[BLOCKSIZE]; //= (Transaction) malloc((NWallet*TR) * sizeof(Transaction));
 	double amount;
-	int count=0; 
+	int index=0; 
 	int sender, receiver;
 	int approved=0, refused=0;
 	initialization(wallets, NWallet);
@@ -58,16 +61,13 @@ int main(int argc, char *argv[]){
 			sender = randomI(NWallet); 
 			receiver = randomI(sender);
 			amount = randomF();
-			if (processTransaction(wallets, transactions, sender, receiver, amount, i))
-				
+			if (processTransaction(wallets, transactions, sender, receiver, amount, index))
 				approved++;
 			else 
-				
 				refused++;
-			
-			count++;
-			if(count%100 == 0){
-				count = 0;
+			index++;
+			if(index == 100){
+				index = 0;
 				usleep(50000); // simulation of proof of work
 				savetodisk(wallets, transactions);
 				//free(transactions); // flush the values in transaction matrix				
@@ -79,10 +79,10 @@ int main(int argc, char *argv[]){
 		print_mat("Transactions Table", transactions);
 	#endif
 	print_vec("Remain Balance", wallets);
-	printf("Simulation of %i Transactions in %f sec\n", NWallet*TR, end-start);
+	printf("Simulation of %i Transactions in %f sec\n", TR, end-start);
 	printf("Approved = %i\n", approved);
 	printf("Refused = %i\n", refused);
-	
+	printChecksum(wallets);
 	
 	
 	return EXIT_SUCCESS;;
@@ -100,7 +100,7 @@ void print_mat(const char *label, struct transaction matrix[TR]){
 	printf("%s\n", label);
 	//for(int i =0; i<NWallet;++i){
 	//	printf("L%i-\t", i);
-		for(int j = 0; j< TR; ++j)
+		for(int j = 0; j< BLOCKSIZE; ++j)
 			printf("%i=>%i=(%.2f)%c;", matrix[j].sender, matrix[j].receiver, matrix[j].amount, matrix[j].status ? 'T':'F');
 		printf("\n");
 	//}
@@ -131,11 +131,23 @@ int randomI (int exc){
 	return random;
 	}
 
-bool flushTDisk(struct transaction transactions[NWallet*TR]){ //fucntion to flush transaction table to the disk
-	return 1;
+void flushTDisk(struct transaction transactions[NWallet*TR]){ //fucntion to flush transaction table to the disk
+	FILE *fp = fopen(BLOCK, "a");
+	fprintf(fp, "T;");
+	for(int i = 0; i < BLOCKSIZE; i++){
+		fprintf(fp, "(%i,%i,%.2f,%c),", transactions[i].sender, transactions[i].receiver, transactions[i].amount, transactions[i].status ? 'T':'F');
+	}
+		fprintf(fp, "\n");
+		fclose(fp);
 }
-bool flushBDisk(double Wallets[]){ //fucntion to flush Balance array to the disk
-	return 1;
+void flushBDisk(double Wallets[]){ //fucntion to flush Balance array to the disk
+	FILE *fp = fopen(BLOCK, "a");
+		fprintf(fp, "B;");
+	for(int i = 0; i < NWallet ; i++){
+		fprintf(fp, "%f,", Wallets[i]);
+	}
+		fprintf(fp, "\n");
+		fclose(fp);
 }
 
 bool processTransaction(double wallets[], struct transaction transactions[NWallet*TR],int sender, int receiver, double amount, int i){
@@ -173,6 +185,17 @@ bool processTransaction(double wallets[], struct transaction transactions[NWalle
 
 void savetodisk(double wallets[], struct transaction transactions[NWallet*TR])
 {
-	flushBDisk(wallets);
 	flushTDisk(transactions);
+	flushBDisk(wallets);
 }
+
+void printChecksum(double vec []){
+	double sum = 0;
+	double check = NWallet*Balance;
+	for(int i = 0; i < NWallet; i++){
+		sum += vec[i];
+	}
+	printf("Total balance = %f\n", check);
+	printf("Checksum = %f\n", sum);
+}
+
