@@ -14,11 +14,11 @@
 
 /* Constants */
 
-#define NWallet 20 // number of Wallets
-#define TR 20 // number of transactions
-#define Balance 5
+#define NWallet 40 // number of Wallets
+#define TR 40000 // number of transactions
+#define Balance 3
 #define PRINT_VECS 1
-#define DEBUG 0
+#define DEBUG 1
 #define MAX_RAND 10000  // max value of elements generated for array
 
 struct transaction 
@@ -41,38 +41,45 @@ bool processTransaction(double wallets[], struct transaction transactions[NWalle
 void savetodisk(double wallets[], struct transaction transactions[NWallet*TR]);
 int main(int argc, char *argv[]){
 	//Q1 = Test the function with different parameters.
-	//double start, end;
-	srand (time(0));
+	double start, end;
+	srand (99);
 	double wallets [NWallet];
-	struct transaction transactions[NWallet*TR]; //= (Transaction) malloc((NWallet*TR) * sizeof(Transaction));
+	struct transaction transactions[TR]; //= (Transaction) malloc((NWallet*TR) * sizeof(Transaction));
 	double amount;
 	int count=0; 
 	int sender, receiver;
 	int approved=0, refused=0;
 	initialization(wallets, NWallet);
 	print_vec("Initial Balance", wallets);
-	for(int i = 0; i < TR ; i++)
-		for(sender = 0; sender < NWallet ; ++sender){
-			//sender = randomI();
+	start = omp_get_wtime();
+	
+	for(int i = 0; i < TR ; i++){
+		//for(int sender = 0; sender < NWallet ; ++sender){
+			sender = randomI(NWallet); 
 			receiver = randomI(sender);
 			amount = randomF();
 			if (processTransaction(wallets, transactions, sender, receiver, amount, i))
+				
 				approved++;
 			else 
+				
 				refused++;
+			
 			count++;
 			if(count%100 == 0){
 				count = 0;
+				usleep(50000); // simulation of proof of work
 				savetodisk(wallets, transactions);
 				//free(transactions); // flush the values in transaction matrix				
 			}
 		}			
 		
-	print_vec("Remain Balance", wallets);
+	end = omp_get_wtime();
 	#if DEBUG
-	print_mat("Transactions Table", transactions);
+		print_mat("Transactions Table", transactions);
 	#endif
-	printf("Simulation of %i Transactions\n", NWallet*TR);
+	print_vec("Remain Balance", wallets);
+	printf("Simulation of %i Transactions in %f sec\n", NWallet*TR, end-start);
 	printf("Approved = %i\n", approved);
 	printf("Refused = %i\n", refused);
 	
@@ -89,15 +96,15 @@ void print_vec(const char *label, double vec[NWallet]){
 	return;
 }
 
-void print_mat(const char *label, struct transaction matrix[NWallet*TR]){
+void print_mat(const char *label, struct transaction matrix[TR]){
 	printf("%s\n", label);
-	for(int i =0; i<NWallet;++i){
-		printf("L%i - \t", i);
+	//for(int i =0; i<NWallet;++i){
+	//	printf("L%i-\t", i);
 		for(int j = 0; j< TR; ++j)
-			printf("%i=>%i=(%.2f) %c\t", matrix[i*NWallet+j].sender, matrix[i*NWallet+j].receiver, matrix[i*NWallet+j].amount, matrix[i*NWallet+j].status ? 'T':'F');
+			printf("%i=>%i=(%.2f)%c;", matrix[j].sender, matrix[j].receiver, matrix[j].amount, matrix[j].status ? 'T':'F');
 		printf("\n");
-	}
-	printf("\n\n");
+	//}
+	//printf("\n\n");
 	return;
 }
 // Initializa the vector with minimal amount
@@ -136,23 +143,25 @@ bool processTransaction(double wallets[], struct transaction transactions[NWalle
 
 	if(amount <=  wallets[sender])
 			{
+				
 				wallets[sender] -= amount;
 				wallets[receiver] +=amount;
 				
-				transactions[sender*NWallet+i].amount = -amount;
-				transactions[sender*NWallet+i].sender = sender;
-				transactions[sender*NWallet+i].receiver = receiver;
-				transactions[sender*NWallet+i].status = true;				
+				
+				transactions[i].amount = -amount;
+				transactions[i].sender = sender;
+				transactions[i].receiver = receiver;
+				transactions[i].status = true;				
 				#if DEBUG
 					printf("Transaction of %f - APPROVED\n", amount);
 				#endif
 				result = true;
 			}else
 			{
-				transactions[sender*NWallet+i].amount = 0;
-				transactions[sender*NWallet+i].sender = sender;
-				transactions[sender*NWallet+i].receiver = receiver;
-				transactions[sender*NWallet+i].status = false;	
+				transactions[i].amount = 0;
+				transactions[i].sender = sender;
+				transactions[i].receiver = receiver;
+				transactions[i].status = false;	
 				
 				#if DEBUG
 					printf("Transaction of %f - REFUSED\n", amount);

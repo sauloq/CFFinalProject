@@ -53,3 +53,6 @@ $(OBJDIR) :
 clean:
 	rm -rf object/
 	rm -f $(PROG)
+
+run: 
+	./main
