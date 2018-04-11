@@ -53,6 +53,8 @@ $(OBJDIR) :
 clean:
 	rm -rf object/
 	rm -f $(PROG)
+	rm -rf blockchain.log
 
 run: 
 	./main
+	

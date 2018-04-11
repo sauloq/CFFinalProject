@@ -3,7 +3,7 @@
  * Daniyal Kowaja
  * 
  */
-
+#define _BSD_SOURCE // fix the warning using usleep
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include "omp.h"
+#include <string.h>
+#include <unistd.h>
 
 /* Constants */
 
@@ -18,10 +20,11 @@
 #define TR 1000 // number of transactions
 #define Balance 3
 #define PRINT_VECS 1
-#define DEBUG 1
+#define DEBUG 0
 #define MAX_RAND 10000  // max value of elements generated for array
 #define BLOCK "blockchain.log"
 #define BLOCKSIZE 100
+
 
 struct transaction 
 {
@@ -45,7 +48,7 @@ void printChecksum (double vec[]);
 int main(int argc, char *argv[]){
 	//Q1 = Test the function with different parameters.
 	double start, end;
-	srand (99);
+	srand (time(NULL));
 	double wallets [NWallet];
 	struct transaction transactions[BLOCKSIZE]; //= (Transaction) malloc((NWallet*TR) * sizeof(Transaction));
 	double amount;
@@ -109,8 +112,34 @@ void print_mat(const char *label, struct transaction matrix[TR]){
 }
 // Initializa the vector with minimal amount
 void initialization(double vec[], int size){
-	for(int i =0 ; i< size; i++){
-		vec[i] = Balance;
+	int bufsize = (NWallet*9)+1;
+	char buf[bufsize];
+	char ch;
+	FILE *fp = fopen(BLOCK, "r");
+	if(!fp){
+		for(int i =0 ; i< size; i++){
+				vec[i] = Balance;
+			}
+	}else{
+		while((ch = fgetc(fp)) != EOF) {
+				if (ch == 'B'){
+					ch = fgetc(fp);
+					fgets(buf, bufsize, fp);				
+				}
+			}
+			#if DEBUG
+				printf("Previous Balance used \n");
+			#endif
+		if(sizeof(buf) > 0){
+			vec[0] = atof(strtok (buf,","));
+			for(int i = 1; i < NWallet ; ++i){
+				vec[i] = atof(strtok (NULL,","));
+			}
+		}else{
+			for(int i =0 ; i< size; i++){
+				vec[i] = Balance;
+			}
+		}
 	}
 }
 
