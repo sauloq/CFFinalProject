@@ -18,15 +18,16 @@
 #include "assert.h"
 
 /* Constants */
-
+#define OpenMP 0 //Using of openmp threads to enhace the performance.
 #define NWallet 100 // number of Wallets
-#define TR 100000 // number of transactions
+//#define TR 10000 //00 // number of transactions
+#define BLOCK 20 // number of blocks on the simulation
+#define BLOCKSIZE 10000
 #define Balance 3
 #define PRINT_VECS 0
 #define DEBUG 0
 #define MAX_RAND 1000000  // max value of elements generated for array
-#define BLOCK "blockchain.log"
-#define BLOCKSIZE 100000
+#define FILENAME "blockchain.log"
 
 //Global variable store the previous block hash
 BYTE Phash[SHA256_BLOCK_SIZE];
@@ -43,20 +44,20 @@ struct transaction
 
 /* Prototypes */
 void print_vec(const char *label, double vec[NWallet]); // print Vectors
-void print_mat(const char *label, struct transaction matrix[NWallet*TR]); //Print Transactions
+void print_mat(const char *label, struct transaction matrix[BLOCKSIZE]); //Print Transactions
 void initialization(double vec[]); // initialize the balance, based on a blockchain file or initial values
 float randomF(); // Generate random amount
 int randomI(int exc); // Generate random integer with exception
-void flushTDisk(struct transaction transactions[NWallet*TR]); //fucntion to flush transaction table to the disk
+void flushTDisk(struct transaction transactions[BLOCKSIZE]); //fucntion to flush transaction table to the disk
 void flushBDisk(double Wallets[]); //fucntion to flush Balance array to the disk
 void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE]); // Flush the hash to the disk
 // function that verify balance to approve transactions and update the balances
-bool processTransaction(double wallets[], struct transaction transactions[NWallet*TR],int sender, int receiver, double amount, int i); 
-void savetodisk(double wallets[], struct transaction transactions[NWallet*TR]); // Save information to the disk
+bool processTransaction(double wallets[], struct transaction transactions[BLOCKSIZE],int sender, int receiver, double amount, int i); 
+void savetodisk(double wallets[], struct transaction transactions[BLOCKSIZE]); // Save information to the disk
 void printChecksum (double vec[]); // Check if the amount of money in the simulation still the same after the simulation
 void hashbalance(double Wallets[],BYTE hash[SHA256_BLOCK_SIZE]); // Generate a hash of the balance array
 void hashblock(double Wallets[], BYTE previous[SHA256_BLOCK_SIZE], BYTE newhash[SHA256_BLOCK_SIZE]); // Hash the balance array with the previous hash
-void checkBlockChain(); //process the entire blockchain file, verifying the consistence of the blockchain (BUG)
+bool checkBlockChain(); //process the entire blockchain file, verifying the consistence of the blockchain (BUG)
 void simulation();// Simulate X transactions between N entities
 
 // Tools function to manipulate hexadecimal
@@ -90,38 +91,32 @@ void simulation(){
 	double wallets [NWallet];
 	struct transaction transactions[BLOCKSIZE]; 
 	double amount;
-	int index=0; 
 	int sender, receiver;
-	int approved=0, refused=0;
+	int approved=0;
 	initialization(wallets);
 	print_vec("Initial Balance", wallets);
 	start = omp_get_wtime();
 	
-	for(int i = 0; i < TR ; i++){
+	for (int b = 0; b < BLOCK;++b){
+		for(int i = 0; i < BLOCKSIZE ; i++){
 			sender = randomI(NWallet); 
 			receiver = randomI(sender);
 			amount = randomF();
-			if (processTransaction(wallets, transactions, sender, receiver, amount, index))
-				approved++;
-			else 
-				refused++;
-			index++;
-			if(index == BLOCKSIZE){
-				index = 0;
-				usleep(50000); // simulation of proof of work
-				savetodisk(wallets, transactions);
-			}
-		}			
+			if (processTransaction(wallets, transactions, sender, receiver, amount, i))
+				approved++;			
+		}
+		//usleep(50000); // simulation of proof of work
+		savetodisk(wallets, transactions);			
+	}
 		
 	end = omp_get_wtime();
 	#if DEBUG
 		//print_mat("Transactions Table", transactions);
 	#endif
 	print_vec("Remain Balance", wallets);
-	printf("Simulation with %i Wallets and ", NWallet);
-	printf("%i Transactions in %f sec\n", TR, end-start);
-	printf("Approved = %i\n", approved);
-	printf("Refused = %i\n", refused);
+	printf("Simulation with %i Wallets, Block= %i, Blocksize = %i and ", NWallet,BLOCK, BLOCKSIZE);
+	printf("Transactions= %i in %f sec\n", BLOCK*BLOCKSIZE, end-start);
+	printf("Approved/Refused = %i/%i \t ratio= %f\n", approved, (BLOCK*BLOCKSIZE)-approved, (double)approved/(BLOCK*BLOCKSIZE) );
 	printChecksum(wallets);
 }
 
@@ -132,7 +127,7 @@ void print_vec(const char *label, double vec[NWallet]){
 	printf("\n\n");
 }
 
-void print_mat(const char *label, struct transaction matrix[TR]){
+void print_mat(const char *label, struct transaction matrix[]){
 	printf("%s\n", label);
 		for(int j = 0; j< BLOCKSIZE; ++j)
 			printf("%i=>%i=(%.2f)%c;", matrix[j].sender, matrix[j].receiver, matrix[j].amount, matrix[j].status ? 'T':'F');
@@ -145,8 +140,48 @@ void initialization(double vec[]){
 	char ch;
 	char hashbuf[SHA256_BLOCK_SIZE*2+1];
 
-	FILE *fp = fopen(BLOCK, "r");
-	if(!fp){
+	if(checkBlockChain()){
+		FILE *fp = fopen(FILENAME, "r");
+		if(!fp){
+			for(int i =0 ; i< NWallet; i++){
+					vec[i] = Balance;
+					initbalance[i] = Balance;
+				}
+			flushBDisk(vec);
+			hashbalance(vec,Phash);
+			flushHDisk(Phash);
+		}else{
+			while((ch = fgetc(fp)) != EOF) {
+					if(ch == 'B'){
+						ch = fgetc(fp);
+						fgets(buf, bufsize, fp);	
+
+					}else if (ch == 'H'){
+						ch = fgetc(fp);
+						fgets(hashbuf, SHA256_BLOCK_SIZE*2+1, fp);
+					}
+				}
+			#if DEBUG
+				printf("Previous Balance used \n");
+			#endif
+			if(sizeof(buf) > 0 && sizeof(hashbuf)> 0){
+				vec[0] = atof(strtok (buf,","));
+				for(int i = 1; i < NWallet ; ++i){
+					vec[i] = atof(strtok (NULL,","));
+					initbalance[i] = vec[i];
+				}
+
+				char * ptr = hashbuf;
+						int index= 0;
+						while(*ptr!='\0'){
+							Phash[index++]= convertStringToByte(ptr);
+							ptr+=2;
+						}
+			}
+		}
+	}else{
+		printf("Generating new blockchain\n");
+		remove(FILENAME);
 		for(int i =0 ; i< NWallet; i++){
 				vec[i] = Balance;
 				initbalance[i] = Balance;
@@ -154,37 +189,6 @@ void initialization(double vec[]){
 		flushBDisk(vec);
 		hashbalance(vec,Phash);
 		flushHDisk(Phash);
-	}else{
-		while((ch = fgetc(fp)) != EOF) {
-				if(ch == 'B'){
-					ch = fgetc(fp);
-					fgets(buf, bufsize, fp);				
-				}else if (ch == 'H'){
-					ch = fgetc(fp);
-					fgets(hashbuf, SHA256_BLOCK_SIZE*2+1, fp);
-					char * ptr = hashbuf;
-					int index= 0;
-					while(*ptr!='\0'){
-						Phash[index++]= convertStringToByte(ptr);
-						ptr+=2;
-					}	
-				}
-			}
-		#if DEBUG
-			printf("Previous Balance used \n");
-		#endif
-		if(sizeof(buf) > 0){
-			vec[0] = atof(strtok (buf,","));
-			for(int i = 1; i < NWallet ; ++i){
-				vec[i] = atof(strtok (NULL,","));
-				initbalance[i] = vec[i];
-			}
-		}else{
-			for(int i =0 ; i< NWallet; i++){
-				vec[i] = Balance;
-				initbalance[i] = Balance;
-			}
-		}
 	}
 }
 
@@ -204,7 +208,7 @@ int randomI (int exc){
 	return random;
 	}
 
-void savetodisk(double wallets[], struct transaction transactions[NWallet*TR])
+void savetodisk(double wallets[], struct transaction transactions[BLOCKSIZE])
 {
 	BYTE hash[SHA256_BLOCK_SIZE];
 	flushTDisk(transactions);
@@ -213,8 +217,8 @@ void savetodisk(double wallets[], struct transaction transactions[NWallet*TR])
 	flushHDisk(hash);
 }
 //fucntion to flush transaction table to the disk
-void flushTDisk(struct transaction transactions[NWallet*TR]){ 
-	FILE *fp = fopen(BLOCK, "a");
+void flushTDisk(struct transaction transactions[BLOCKSIZE]){ 
+	FILE *fp = fopen(FILENAME, "a");
 	fprintf(fp, "T;");
 	for(int i = 0; i < BLOCKSIZE; i++){
 		fprintf(fp, "(%i,%i,%f,%c),", transactions[i].sender, transactions[i].receiver, transactions[i].amount, transactions[i].status ? 'T':'F');
@@ -225,7 +229,7 @@ void flushTDisk(struct transaction transactions[NWallet*TR]){
 
 //fucntion to flush Balance array to the disk
 void flushBDisk(double Wallets[]){ 
-	FILE *fp = fopen(BLOCK, "a");
+	FILE *fp = fopen(FILENAME, "a");
 		fprintf(fp, "B;");
 	for(int i = 0; i < NWallet ; i++){
 		fprintf(fp, "%f,", Wallets[i]);
@@ -237,7 +241,7 @@ void flushBDisk(double Wallets[]){
 // function that flush hash to the disk
 void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE]){ 
 	memcpy(Phash, hash, SHA256_BLOCK_SIZE);
-	FILE *fp = fopen(BLOCK, "a");
+	FILE *fp = fopen(FILENAME, "a");
 	fprintf(fp, "H;");
 	for(int i = 0 ; i<SHA256_BLOCK_SIZE;i++)
 		fprintf(fp,"%02x", Phash[i]);
@@ -245,7 +249,7 @@ void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE]){
 	fclose(fp);
 }
 
-bool processTransaction(double wallets[], struct transaction transactions[NWallet*TR],int sender, int receiver, double amount, int i){
+bool processTransaction(double wallets[], struct transaction transactions[BLOCKSIZE],int sender, int receiver, double amount, int i){
 	bool result;
 
 	if(amount <=  wallets[sender])
@@ -294,11 +298,11 @@ void printHash(BYTE hash[SHA256_BLOCK_SIZE]){
 
 void hashbalance(double Wallets[], BYTE hash[SHA256_BLOCK_SIZE]){
 	SHA256_CTX ctx;
-	char balance[9];
+	unsigned char balance[9];
 	sha256_init(&ctx);
 	for(int i = 0 ; i < NWallet ; i++){
 		snprintf(balance, 9, "%f", Wallets[i]);
-		sha256_update(&ctx, balance, strlen(balance));
+		sha256_update(&ctx, balance, sizeof(balance));
 	}
 	sha256_final(&ctx, hash);
 	#if DEBUG
@@ -311,8 +315,8 @@ void hashblock(double Wallets[], BYTE previous[SHA256_BLOCK_SIZE], BYTE newhash[
 	BYTE balanceh[SHA256_BLOCK_SIZE];
 	hashbalance(Wallets, balanceh);
 	sha256_init(&ctx);
-	sha256_update(&ctx, previous, strlen(previous));
-	sha256_update(&ctx, balanceh, strlen(balanceh));	
+	sha256_update(&ctx, previous, sizeof(previous));
+	sha256_update(&ctx, balanceh, sizeof(balanceh));	
 	sha256_final(&ctx, newhash);
 	#if DEBUG
 		//printHash(newhash);
@@ -356,7 +360,7 @@ BYTE convertStringToByte( const char * str )
 	return value;
 }
 
-void checkBlockChain(){
+bool checkBlockChain(){
 	
 	double vec[NWallet];
 	int bufsize = (NWallet*10)+2;
@@ -369,7 +373,7 @@ void checkBlockChain(){
 	int pass = 1;
 	int flag = 0;
 
-	FILE *fp = fopen(BLOCK, "r");
+	FILE *fp = fopen(FILENAME, "r");
 	if(!fp){
 		printf("Empty Block Chain\n");
 	}else{
@@ -421,13 +425,13 @@ void checkBlockChain(){
 				}								
 			}				
 		}
-		if (pass)
+		if (pass){
 			printf("Blockchain is working fine\n");
-		else
+			return true;
+		}else
 			printf("Blockchain is corrupted\n");
-		#if DEBUG
-			printf("Previous Balance used \n");
-		#endif
+		
+		return false;
 		
 	}
 }
