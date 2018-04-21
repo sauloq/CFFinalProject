@@ -18,10 +18,13 @@
 #include "assert.h"
 
 /* Constants */
-#define OpenMP 0 //Using of openmp threads to enhace the performance.
-#define NWallet 100 // number of Wallets
+#define OpenMP 0//Using of openmp threads to enhace the performance on the simulations of blocks' loop;
+#define OpenMP1 0 //Using of openmp threads to enhace the performance on the PoW();
+#define ThreadNum 50
+#define NWallet 1000 // number of Wallets
 //#define TR 10000 //00 // number of transactions
-#define BLOCK 20 // number of blocks on the simulation
+#define PoWD 1000000 //Range of number to find; 10 millions
+#define BLOCK 2// number of blocks on the simulation
 #define BLOCKSIZE 10000
 #define Balance 3
 #define PRINT_VECS 0
@@ -50,16 +53,17 @@ float randomF(); // Generate random amount
 int randomI(int exc); // Generate random integer with exception
 void flushTDisk(struct transaction transactions[BLOCKSIZE]); //fucntion to flush transaction table to the disk
 void flushBDisk(double Wallets[]); //fucntion to flush Balance array to the disk
-void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE]); // Flush the hash to the disk
+void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE], int nonce); // Flush the hash to the disk
 // function that verify balance to approve transactions and update the balances
 bool processTransaction(double wallets[], struct transaction transactions[BLOCKSIZE],int sender, int receiver, double amount, int i); 
-void savetodisk(double wallets[], struct transaction transactions[BLOCKSIZE]); // Save information to the disk
+void savetodisk(double wallets[], struct transaction transactions[BLOCKSIZE], int nonce); // Save information to the disk
 void printChecksum (double vec[]); // Check if the amount of money in the simulation still the same after the simulation
 void hashbalance(double Wallets[],BYTE hash[SHA256_BLOCK_SIZE]); // Generate a hash of the balance array
 void hashblock(double Wallets[], BYTE previous[SHA256_BLOCK_SIZE], BYTE newhash[SHA256_BLOCK_SIZE]); // Hash the balance array with the previous hash
 bool checkBlockChain(); //process the entire blockchain file, verifying the consistence of the blockchain (BUG)
 void simulation();// Simulate X transactions between N entities
-
+bool CheckPoW(int try, int key); // check if the nonce achieve the requirements of difficult
+int PoW ();//return the nonce
 // Tools function to manipulate hexadecimal
 BYTE convertStringToByte( const char * str ); 
 BYTE convertCharToByte( const char ch );
@@ -67,6 +71,7 @@ BYTE convertCharToByte( const char ch );
 
 // Receive parameter to simulate 's' or check the blockchain integrity 'c' in case of no parameter it runs the simulation and Check process
 int main(int argc, char *argv[]){
+	
 	if (argc == 2){
 		switch(argv[1][0]){
 			case 's':
@@ -86,17 +91,25 @@ int main(int argc, char *argv[]){
 }
 //Simulation function
 void simulation(){
-	double start, end;
+	double start, end;	
+	double powstart, powend, powtotal = 0;
+	double filestart, fileend, filetotal = 0;
 	srand (time(NULL));
 	double wallets [NWallet];
 	struct transaction transactions[BLOCKSIZE]; 
 	double amount;
 	int sender, receiver;
 	int approved=0;
+	#if OpenMP1 || OpenMP
+	printf("Simulation using %i OpenMP Threads\n", ThreadNum);
+	#pragma omp single
+	#endif
 	initialization(wallets);
 	print_vec("Initial Balance", wallets);
 	start = omp_get_wtime();
-	
+	#if OpenMP
+		#pragma omp parallel for reduction (+:approved) reduction(+:powtotal) reduction(+:filetotal) private (sender, receiver, amount, powend, powstart, filestart, fileend) shared(wallets, transactions) num_threads(ThreadNum)
+		#endif
 	for (int b = 0; b < BLOCK;++b){
 		for(int i = 0; i < BLOCKSIZE ; i++){
 			sender = randomI(NWallet); 
@@ -105,17 +118,24 @@ void simulation(){
 			if (processTransaction(wallets, transactions, sender, receiver, amount, i))
 				approved++;			
 		}
-		//usleep(50000); // simulation of proof of work
-		savetodisk(wallets, transactions);			
+		powstart = omp_get_wtime();
+		PoW(); // simulation of proof of work
+		powend = omp_get_wtime();
+		powtotal += (powend - powstart);
+		/*filestart =  omp_get_wtime();
+		savetodisk(wallets, transactions, 1);	
+		fileend = omp_get_wtime();
+		filetotal += (fileend - filestart);		*/
 	}
 		
 	end = omp_get_wtime();
 	#if DEBUG
 		//print_mat("Transactions Table", transactions);
-	#endif
+	#endif 
 	print_vec("Remain Balance", wallets);
 	printf("Simulation with %i Wallets, Block= %i, Blocksize = %i and ", NWallet,BLOCK, BLOCKSIZE);
-	printf("Transactions= %i in %f sec\n", BLOCK*BLOCKSIZE, end-start);
+	printf("Transactions= %i\n", BLOCK*BLOCKSIZE);
+	printf("Time PoW = %f \t FILE = %f \t Simulation time = %f \n", powtotal/BLOCK, filetotal/BLOCK ,end - start);
 	printf("Approved/Refused = %i/%i \t ratio= %f\n", approved, (BLOCK*BLOCKSIZE)-approved, (double)approved/(BLOCK*BLOCKSIZE) );
 	printChecksum(wallets);
 }
@@ -135,21 +155,25 @@ void print_mat(const char *label, struct transaction matrix[]){
 }
 // Initialize the vector with balance from the file or minimal amount
 void initialization(double vec[]){
-	int bufsize = (NWallet*9)+1;
+	int bufsize = (NWallet*10)+1;
 	char buf[bufsize];
 	char ch;
 	char hashbuf[SHA256_BLOCK_SIZE*2+1];
-
+	BYTE hash[SHA256_BLOCK_SIZE];
+	int nonce=0;
 	if(checkBlockChain()){
+		sleep(1);
 		FILE *fp = fopen(FILENAME, "r");
 		if(!fp){
+			printf("File problem to open\n");
 			for(int i =0 ; i< NWallet; i++){
 					vec[i] = Balance;
 					initbalance[i] = Balance;
 				}
 			flushBDisk(vec);
 			hashbalance(vec,Phash);
-			flushHDisk(Phash);
+			hashblock(vec,Phash,hash);
+			flushHDisk(hash, nonce);
 		}else{
 			while((ch = fgetc(fp)) != EOF) {
 					if(ch == 'B'){
@@ -188,7 +212,8 @@ void initialization(double vec[]){
 			}
 		flushBDisk(vec);
 		hashbalance(vec,Phash);
-		flushHDisk(Phash);
+		hashblock(vec,Phash,hash);
+		flushHDisk(hash, nonce);
 	}
 }
 
@@ -208,13 +233,20 @@ int randomI (int exc){
 	return random;
 	}
 
-void savetodisk(double wallets[], struct transaction transactions[BLOCKSIZE])
-{
-	BYTE hash[SHA256_BLOCK_SIZE];
-	flushTDisk(transactions);
-	flushBDisk(wallets);
-	hashblock(wallets, Phash ,hash);
-	flushHDisk(hash);
+void savetodisk(double wallets[], struct transaction transactions[BLOCKSIZE], int nonce)
+{	
+	#if OpenMP
+	#pragma omp critical (File_handler)
+	{
+	#endif
+		BYTE hash[SHA256_BLOCK_SIZE];
+		flushTDisk(transactions);
+		flushBDisk(wallets);
+		hashblock(wallets, Phash ,hash);
+		flushHDisk(hash, nonce);
+	#if OpenMP
+	}
+	#endif
 }
 //fucntion to flush transaction table to the disk
 void flushTDisk(struct transaction transactions[BLOCKSIZE]){ 
@@ -239,9 +271,10 @@ void flushBDisk(double Wallets[]){
 }
 
 // function that flush hash to the disk
-void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE]){ 
+void flushHDisk(BYTE hash[SHA256_BLOCK_SIZE],int nonce){ 
 	memcpy(Phash, hash, SHA256_BLOCK_SIZE);
 	FILE *fp = fopen(FILENAME, "a");
+	fprintf(fp,"N;%i\n",nonce);
 	fprintf(fp, "H;");
 	for(int i = 0 ; i<SHA256_BLOCK_SIZE;i++)
 		fprintf(fp,"%02x", Phash[i]);
@@ -254,9 +287,15 @@ bool processTransaction(double wallets[], struct transaction transactions[BLOCKS
 
 	if(amount <=  wallets[sender])
 			{
-				
+				#if OpenMP
+				#pragma omp atomic
+				#endif
 				wallets[sender] -= amount;
-				wallets[receiver] +=amount;				
+				#if OpenMP
+				#pragma omp atomic
+				#endif
+				wallets[receiver] +=amount;		
+
 				transactions[i].amount = -amount;
 				transactions[i].sender = sender;
 				transactions[i].receiver = receiver;
@@ -298,7 +337,7 @@ void printHash(BYTE hash[SHA256_BLOCK_SIZE]){
 
 void hashbalance(double Wallets[], BYTE hash[SHA256_BLOCK_SIZE]){
 	SHA256_CTX ctx;
-	unsigned char balance[9];
+	BYTE balance[9];
 	sha256_init(&ctx);
 	for(int i = 0 ; i < NWallet ; i++){
 		snprintf(balance, 9, "%f", Wallets[i]);
@@ -306,7 +345,7 @@ void hashbalance(double Wallets[], BYTE hash[SHA256_BLOCK_SIZE]){
 	}
 	sha256_final(&ctx, hash);
 	#if DEBUG
-		//printHash(hash);
+		printHash(hash);
 	#endif
 }
 
@@ -321,6 +360,47 @@ void hashblock(double Wallets[], BYTE previous[SHA256_BLOCK_SIZE], BYTE newhash[
 	#if DEBUG
 		//printHash(newhash);
 	#endif
+}
+
+int PoW (){
+	int key = rand() % PoWD;	
+	int flagPoW =1;
+	int try = 0;
+	BYTE text1[] = {"NONCE"};
+	BYTE result[SHA256_BLOCK_SIZE];
+	#if OpenMP1
+	int chunk = PoWD/ThreadNum;
+	#pragma omp parallel shared(flagPoW) num_threads(ThreadNum) private (try)
+	{
+		int mynum = omp_get_thread_num();
+		try = mynum * chunk;	
+	#endif
+		do{
+			SHA256_CTX ctx;
+			BYTE solution[SHA256_BLOCK_SIZE];
+			sha256_init(&ctx);
+			sha256_update(&ctx, Phash, sizeof(Phash));
+			sha256_update(&ctx, text1, sizeof(text1));	
+			sha256_final(&ctx, solution);
+			if(CheckPoW(try,key)){
+				flagPoW = 0;
+				memcpy(result, solution, SHA256_BLOCK_SIZE);
+				//printf("k=%i\n", try);
+			}
+			try++;
+		}while(flagPoW == 1);
+	#if OpenMP1
+	}
+	#endif
+	return key;
+}
+
+
+//Function that simulate the checking of the proof of work
+bool CheckPoW(int test, int nonce){
+	if(test == nonce)
+		return true;
+	return false;
 }
 
 BYTE convertCharToByte( const char ch )
@@ -391,7 +471,8 @@ bool checkBlockChain(){
 				hashblock(vec, Phash, Chash);
 				if (!flag){
 					flag = 1;
-					hashbalance(vec, Chash);
+					hashbalance(vec, Phash);
+					hashblock(vec,Phash,Chash);
 				}
 			}else if (ch == 'H'){
 				ch = fgetc(fp);
@@ -428,10 +509,9 @@ bool checkBlockChain(){
 		if (pass){
 			printf("Blockchain is working fine\n");
 			return true;
-		}else
+		}else{
 			printf("Blockchain is corrupted\n");
-		
-		return false;
-		
+		}		
 	}
+	return false;
 }

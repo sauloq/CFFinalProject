@@ -9,7 +9,7 @@ PROG = main
 # space-delimited list of header files
 HDRS =
 # space-delimited list of source files
-SRCS = main.c
+SRCS = mainSerial.c
 
 #######################
 # Don't change these: #
